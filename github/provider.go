@@ -2,7 +2,6 @@ package github
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -13,7 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/google/go-github/v88/github"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/diag"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
@@ -243,6 +241,7 @@ func NewProvider(version, commit string) func() *schema.Provider {
 				"github_user_gpg_key":                                                   resourceGithubUserGpgKey(),
 				"github_user_invitation_accepter":                                       resourceGithubUserInvitationAccepter(),
 				"github_user_ssh_key":                                                   resourceGithubUserSshKey(),
+				"github_enterprise_app_installation":                                    resourceGithubEnterpriseAppInstallation(),
 				"github_enterprise_organization":                                        resourceGithubEnterpriseOrganization(),
 				"github_enterprise_actions_runner_group":                                resourceGithubActionsEnterpriseRunnerGroup(),
 				"github_enterprise_ip_allow_list_entry":                                 resourceGithubEnterpriseIpAllowListEntry(),
@@ -290,6 +289,8 @@ func NewProvider(version, commit string) func() *schema.Provider {
 				"github_organization_custom_properties":                                 dataSourceGithubOrganizationCustomProperties(),
 				"github_organization_external_identities":                               dataSourceGithubOrganizationExternalIdentities(),
 				"github_organization_ip_allow_list":                                     dataSourceGithubOrganizationIpAllowList(),
+				"github_organization_members":                                           dataSourceGithubOrganizationMembers(),
+				"github_organization_repositories":                                      dataSourceGithubOrganizationRepositories(),
 				"github_organization_repository_role":                                   dataSourceGithubOrganizationRepositoryRole(),
 				"github_organization_repository_roles":                                  dataSourceGithubOrganizationRepositoryRoles(),
 				"github_organization_role":                                              dataSourceGithubOrganizationRole(),
@@ -322,11 +323,16 @@ func NewProvider(version, commit string) func() *schema.Provider {
 				"github_rest_api":                                                       dataSourceGithubRestApi(),
 				"github_ssh_keys":                                                       dataSourceGithubSshKeys(),
 				"github_team":                                                           dataSourceGithubTeam(),
+				"github_team_members":                                                   dataSourceGithubTeamMembers(),
+				"github_team_repositories":                                              dataSourceGithubTeamRepositories(),
 				"github_tree":                                                           dataSourceGithubTree(),
 				"github_user":                                                           dataSourceGithubUser(),
 				"github_user_external_identity":                                         dataSourceGithubUserExternalIdentity(),
 				"github_users":                                                          dataSourceGithubUsers(),
 				"github_enterprise":                                                     dataSourceGithubEnterprise(),
+				"github_enterprise_app_accessible_organization_repositories":            dataSourceGithubEnterpriseAppAccessibleOrganizationRepositories(),
+				"github_enterprise_app_installable_organizations":                       dataSourceGithubEnterpriseAppInstallableOrganizations(),
+				"github_enterprise_app_installations":                                   dataSourceGithubEnterpriseAppInstallations(),
 				"github_repository_environment_deployment_policies":                     dataSourceGithubRepositoryEnvironmentDeploymentPolicies(),
 			},
 
@@ -491,8 +497,7 @@ func configureProvider(version, commit string) func(context.Context, *schema.Res
 		if v, ok := d.GetOk("max_per_page"); ok {
 			if i, ok := v.(int); ok {
 				tflog.Debug(ctx, "Using max per page from provider configuration.", map[string]any{"max_per_page": i})
-				// TODO: Move max per page to the provider metadata and remove the global variable.
-				maxPerPage = i
+				config.MaxPerPage = i
 			}
 		}
 
@@ -529,7 +534,8 @@ func configureProvider(version, commit string) func(context.Context, *schema.Res
 // configureProviderMeta initializes the provider metadata, including setting up the GitHub API clients based on the provided configuration. It returns the initialized metadata or an error if the configuration is invalid or if there are issues initializing the clients.
 func configureProviderMeta(ctx context.Context, version string, c *Config) (*Owner, error) {
 	owner := &Owner{
-		name: c.Owner,
+		name:       c.Owner,
+		maxPerPage: c.MaxPerPage,
 	}
 
 	if c.LegacyClient {
@@ -616,16 +622,14 @@ func configureProviderMeta(ctx context.Context, version string, c *Config) (*Own
 	}
 
 	if owner.name != "" {
-		org, _, err := owner.v3client.Organizations.Get(ctx, owner.name)
+		o, _, err := owner.v3client.Users.Get(ctx, owner.name)
 		if err != nil {
-			if ghErr, ok := errors.AsType[*github.ErrorResponse](err); !ok || ghErr.Response == nil || ghErr.Response.StatusCode != http.StatusNotFound {
-				return nil, fmt.Errorf("failed to lookup organization %q: %w", owner.name, err)
-			}
+			return nil, fmt.Errorf("failed to lookup owner %q: %w", owner.name, err)
 		}
 
-		if org != nil {
-			owner.id = org.GetID()
+		if o.GetType() == "Organization" {
 			owner.IsOrganization = true
+			owner.id = o.GetID()
 		}
 	}
 
