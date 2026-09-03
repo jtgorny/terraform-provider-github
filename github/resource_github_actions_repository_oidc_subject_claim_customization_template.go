@@ -3,8 +3,9 @@ package github
 import (
 	"context"
 	"errors"
+	"fmt"
 
-	"github.com/google/go-github/v88/github"
+	gh "github.com/google/go-github/v88/github"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/schema"
 	"github.com/hashicorp/terraform-plugin-sdk/v2/helper/validation"
 )
@@ -39,8 +40,26 @@ func resourceGithubActionsRepositoryOIDCSubjectClaimCustomizationTemplate() *sch
 					Type: schema.TypeString,
 				},
 			},
+			"use_immutable_subject": {
+				Type:        schema.TypeBool,
+				Optional:    true,
+				Computed:    true,
+				Description: "Whether the repository uses the immutable, repository-ID-based OIDC subject format. The existing setting is preserved when omitted.",
+			},
+			"sub_claim_prefix": {
+				Type:        schema.TypeString,
+				Computed:    true,
+				Description: "The effective repository prefix used in the OIDC subject claim.",
+			},
 		},
 	}
+}
+
+type repositoryOIDCSubjectClaimCustomTemplate struct {
+	UseDefault          *bool    `json:"use_default,omitempty"`
+	IncludeClaimKeys    []string `json:"include_claim_keys,omitempty"`
+	UseImmutableSubject *bool    `json:"use_immutable_subject,omitempty"`
+	SubClaimPrefix      *string  `json:"sub_claim_prefix,omitempty"`
 }
 
 func resourceGithubActionsRepositoryOIDCSubjectClaimCustomizationTemplateCreateOrUpdate(d *schema.ResourceData, meta any) error {
@@ -56,8 +75,21 @@ func resourceGithubActionsRepositoryOIDCSubjectClaimCustomizationTemplateCreateO
 		return errors.New("include_claim_keys cannot be set when use_default is true")
 	}
 
-	customOIDCSubjectClaimTemplate := &github.OIDCSubjectClaimCustomTemplate{
-		UseDefault: &useDefault,
+	ctx := context.Background()
+	currentTemplate, _, err := getRepositoryOIDCSubjectClaimCustomTemplate(ctx, client, owner, repository)
+	if err != nil {
+		return err
+	}
+
+	useImmutableSubject := currentTemplate.UseImmutableSubject
+	if configured, ok := d.GetOkExists("use_immutable_subject"); ok {
+		value := configured.(bool)
+		useImmutableSubject = &value
+	}
+
+	customOIDCSubjectClaimTemplate := &repositoryOIDCSubjectClaimCustomTemplate{
+		UseDefault:          &useDefault,
+		UseImmutableSubject: useImmutableSubject,
 	}
 
 	if includeClaimKeys != nil {
@@ -73,8 +105,7 @@ func resourceGithubActionsRepositoryOIDCSubjectClaimCustomizationTemplateCreateO
 		customOIDCSubjectClaimTemplate.IncludeClaimKeys = claimsStr
 	}
 
-	ctx := context.Background()
-	_, err := client.Actions.SetRepoOIDCSubjectClaimCustomTemplate(ctx, owner, repository, customOIDCSubjectClaimTemplate)
+	_, err = setRepositoryOIDCSubjectClaimCustomTemplate(ctx, client, owner, repository, customOIDCSubjectClaimTemplate)
 	if err != nil {
 		return err
 	}
@@ -90,7 +121,7 @@ func resourceGithubActionsRepositoryOIDCSubjectClaimCustomizationTemplateRead(d 
 	owner := meta.(*Owner).name
 
 	ctx := context.Background()
-	template, _, err := client.Actions.GetRepoOIDCSubjectClaimCustomTemplate(ctx, owner, repository)
+	template, _, err := getRepositoryOIDCSubjectClaimCustomTemplate(ctx, client, owner, repository)
 	if err != nil {
 		return deleteResourceOn404AndSwallow304OtherwiseReturnError(err, d, "actions repository oidc subject claim customization template (%s, %s)", owner, repository)
 	}
@@ -102,6 +133,12 @@ func resourceGithubActionsRepositoryOIDCSubjectClaimCustomizationTemplateRead(d 
 		return err
 	}
 	if err = d.Set("include_claim_keys", template.IncludeClaimKeys); err != nil {
+		return err
+	}
+	if err = d.Set("use_immutable_subject", template.UseImmutableSubject); err != nil {
+		return err
+	}
+	if err = d.Set("sub_claim_prefix", template.SubClaimPrefix); err != nil {
 		return err
 	}
 
@@ -116,15 +153,54 @@ func resourceGithubActionsRepositoryOIDCSubjectClaimCustomizationTemplateDelete(
 	repository := d.Get("repository").(string)
 	owner := meta.(*Owner).name
 
-	customOIDCSubjectClaimTemplate := &github.OIDCSubjectClaimCustomTemplate{
-		UseDefault: new(true),
+	ctx := context.Background()
+	currentTemplate, _, err := getRepositoryOIDCSubjectClaimCustomTemplate(ctx, client, owner, repository)
+	if err != nil {
+		return err
 	}
 
-	ctx := context.Background()
-	_, err := client.Actions.SetRepoOIDCSubjectClaimCustomTemplate(ctx, owner, repository, customOIDCSubjectClaimTemplate)
+	customOIDCSubjectClaimTemplate := &repositoryOIDCSubjectClaimCustomTemplate{
+		UseDefault:          new(true),
+		UseImmutableSubject: currentTemplate.UseImmutableSubject,
+	}
+
+	_, err = setRepositoryOIDCSubjectClaimCustomTemplate(ctx, client, owner, repository, customOIDCSubjectClaimTemplate)
 	if err != nil {
 		return err
 	}
 
 	return nil
+}
+
+func getRepositoryOIDCSubjectClaimCustomTemplate(
+	ctx context.Context,
+	client *gh.Client,
+	owner string,
+	repository string,
+) (*repositoryOIDCSubjectClaimCustomTemplate, *gh.Response, error) {
+	endpoint := fmt.Sprintf("repos/%s/%s/actions/oidc/customization/sub", owner, repository)
+	req, err := client.NewRequest(ctx, "GET", endpoint, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	var template *repositoryOIDCSubjectClaimCustomTemplate
+	resp, err := client.Do(req, &template)
+	return template, resp, err
+}
+
+func setRepositoryOIDCSubjectClaimCustomTemplate(
+	ctx context.Context,
+	client *gh.Client,
+	owner string,
+	repository string,
+	template *repositoryOIDCSubjectClaimCustomTemplate,
+) (*gh.Response, error) {
+	endpoint := fmt.Sprintf("repos/%s/%s/actions/oidc/customization/sub", owner, repository)
+	req, err := client.NewRequest(ctx, "PUT", endpoint, template)
+	if err != nil {
+		return nil, err
+	}
+
+	return client.Do(req, nil)
 }

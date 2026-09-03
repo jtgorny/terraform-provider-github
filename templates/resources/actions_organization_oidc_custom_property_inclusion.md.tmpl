@@ -1,0 +1,29 @@
+---
+page_title: "{{.Name}} ({{.Type}}) - {{.RenderedProviderName}}"
+description: |-
+  Includes an organization repository custom property in GitHub Actions OIDC tokens
+---
+
+# {{.Name}} ({{.Type}})
+
+This resource includes an organization-level repository custom property in the OpenID Connect tokens issued to GitHub Actions workflows. The custom property must already exist in the organization.
+
+Included properties appear as claims prefixed with `repo_property_`. For example, the custom property `owner` appears as `repo_property_owner`.
+
+## Example Usage
+
+{{ tffile "examples/resources/actions_organization_oidc_custom_property_inclusion/example_1.tf" }}
+
+## Argument Reference
+
+The following argument is supported:
+
+- `custom_property_name` - (Required) The organization repository custom property to include in GitHub Actions OIDC tokens.
+
+## Import
+
+This resource can be imported using the custom property name.
+
+```shell
+terraform import github_actions_organization_oidc_custom_property_inclusion.owner owner
+```

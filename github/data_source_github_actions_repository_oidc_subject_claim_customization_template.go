@@ -27,6 +27,14 @@ func dataSourceGithubActionsRepositoryOIDCSubjectClaimCustomizationTemplate() *s
 					Type: schema.TypeString,
 				},
 			},
+			"use_immutable_subject": {
+				Type:     schema.TypeBool,
+				Computed: true,
+			},
+			"sub_claim_prefix": {
+				Type:     schema.TypeString,
+				Computed: true,
+			},
 		},
 	}
 }
@@ -37,7 +45,7 @@ func dataSourceGithubActionsRepositoryOIDCSubjectClaimCustomizationTemplateRead(
 	repository := d.Get("name").(string)
 	owner := meta.(*Owner).name
 
-	template, _, err := client.Actions.GetRepoOIDCSubjectClaimCustomTemplate(ctx, owner, repository)
+	template, _, err := getRepositoryOIDCSubjectClaimCustomTemplate(ctx, client, owner, repository)
 	if err != nil {
 		return diag.FromErr(err)
 	}
@@ -48,6 +56,14 @@ func dataSourceGithubActionsRepositoryOIDCSubjectClaimCustomizationTemplateRead(
 		return diag.FromErr(err)
 	}
 	err = d.Set("include_claim_keys", template.IncludeClaimKeys)
+	if err != nil {
+		return diag.FromErr(err)
+	}
+	err = d.Set("use_immutable_subject", template.UseImmutableSubject)
+	if err != nil {
+		return diag.FromErr(err)
+	}
+	err = d.Set("sub_claim_prefix", template.SubClaimPrefix)
 	if err != nil {
 		return diag.FromErr(err)
 	}

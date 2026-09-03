@@ -38,6 +38,11 @@ The following arguments are supported:
 
 - `use_default` - (Required) Whether to use the default template or not. If `true`, `include_claim_keys` must not be set.
 - `include_claim_keys` - (Optional) A list of OpenID Connect claims.
+- `use_immutable_subject` - (Optional) Whether to use the immutable, repository-ID-based subject format. When omitted, the provider preserves the repository's existing setting.
+
+The following attribute is exported:
+
+- `sub_claim_prefix` - The effective repository prefix used in the OIDC subject claim.
 
 ## Import
 
